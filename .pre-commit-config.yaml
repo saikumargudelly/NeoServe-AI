@@ -1,0 +1,73 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-added-large-files
+    -   id: debug-statements
+    -   id: requirements-txt-fixer
+    -   id: mixed-line-ending
+        args: [--fix=lf]
+
+-   repo: https://github.com/psf/black
+    rev: 23.3.0
+    hooks:
+    -   id: black
+        language_version: python3.8
+
+-   repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+    -   id: isort
+        name: isort (python)
+        types: [python]
+
+-   repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+    -   id: flake8
+        additional_dependencies: [flake8-bugbear]
+
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.3.0
+    hooks:
+    -   id: mypy
+        additional_dependencies: [types-requests, types-python-dateutil]
+        args: [--ignore-missing-imports, --disallow-untyped-defs]
+
+-   repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.9.0
+    hooks:
+    -   id: python-check-blanket-noqa
+    -   id: python-check-blanket-type-ignore
+    -   id: python-no-eval
+    -   id: python-use-type-annotations
+
+-   repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.0.261
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+-   repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.0.0-alpha.6
+    hooks:
+    -   id: prettier
+        types: [yaml, json, markdown, html, css, scss, javascript]
+        additional_dependencies:
+          - prettier@2.8.3
+          - prettier-plugin-sort-json@1.0.0
+          - prettier-plugin-toml@0.3.1
+          - @prettier/plugin-xml@2.2.0
+
+-   repo: local
+    hooks:
+    -   id: requirements
+        name: requirements
+        entry: bash -c 'pip freeze > requirements.txt; git add requirements.txt'
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [commit-msg]
