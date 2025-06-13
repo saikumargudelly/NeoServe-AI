@@ -1,15 +1,21 @@
 services:
   - type: web
     name: neoserve-ai
-    env: python
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: gunicorn neoserve_ai.main:app --worker-class uvicorn.workers.UvicornWorker --workers 1 --bind 0.0.0.0:$PORT
+    env: docker
+    dockerfile: Dockerfile.prod
+    dockerContext: .
+    dockerCommand: /app/start_services.sh
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: PORT
-        value: 10000
+        value: "8000"
+      - key: API_URL
+        value: /api
       - key: ENVIRONMENT
         value: production
+      - key: NODE_ENV
+        value: production
+    buildCommand: |
+      docker build -f Dockerfile.prod -t neoserve-ai .
+    startCommand: docker run -p 10000:80 neoserve-ai
