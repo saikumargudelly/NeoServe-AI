@@ -1,7 +1,8 @@
 from typing import Dict, Any, List, Optional
 import logging
 from .base_agent import BaseAgent
-from google.cloud import discoveryengine
+# Use our custom import wrapper for better error handling
+from .google_imports import SEARCH_SERVICE_CLIENT
 
 class KnowledgeBaseAgent(BaseAgent):
     """
@@ -39,8 +40,10 @@ class KnowledgeBaseAgent(BaseAgent):
                 )
                 return
             
-            # Initialize the Discovery Engine client
-            self.client = discoveryengine.SearchServiceClient()
+            # Initialize the Discovery Engine client using our imported client class
+            if SEARCH_SERVICE_CLIENT is None:
+                raise ImportError("Failed to import SearchServiceClient. Check logs for details.")
+            self.client = SEARCH_SERVICE_CLIENT()
             
             # Construct the serving config name
             serving_config = self.config.get("serving_config_id", "default_config")

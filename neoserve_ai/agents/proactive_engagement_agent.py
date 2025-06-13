@@ -2,11 +2,14 @@ from typing import Dict, Any, List, Optional, Set
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from .base_agent import BaseAgent
-from google.cloud import pubsub_v1
-from google.cloud import scheduler
-from google.cloud import tasks_v2
 from google.protobuf import timestamp_pb2
+
+from .base_agent import BaseAgent
+# Use our custom import wrapper for better error handling
+from .google_imports import (
+    PUBSUB_PUBLISHER_CLIENT, PUBSUB_SUBSCRIBER_CLIENT,
+    CLOUD_SCHEDULER_CLIENT, CLOUD_TASKS_CLIENT
+)
 
 class ProactiveEngagementAgent(BaseAgent):
     """
@@ -37,43 +40,97 @@ class ProactiveEngagementAgent(BaseAgent):
     def initialize_agent(self) -> None:
         """Initialize the required GCP clients and resources."""
         try:
-            project_id = self.config.project_id
-            self.location = self.config.location
-            topic_id = self.config.topic_id
-            default_delay_minutes = self.config.default_delay_minutes
-            max_engagement_attempts = self.config.max_engagement_attempts
-            enable_proactive_engagement = self.config.enable_proactive_engagement
+            project_id = self.config.get("project_id")
+            self.location = self.config.get("location", "us-central1")
+            topic_id = self.config.get("topic_id", "proactive-engagements")
             
             if not project_id:
                 self.logger.warning(
-                    "Missing project_id in configuration. "
-                    "Proactive engagement features will be limited."
+                    "Missing project_id in config. Proactive engagement will be disabled."
                 )
                 return
-            
-            # Initialize Pub/Sub publisher
-            self.publisher = pubsub_v1.PublisherClient()
-            self.topic_path = self.publisher.topic_path(project_id, topic_id)
-            
-            # Ensure the topic exists
-            try:
-                self.publisher.get_topic(topic=self.topic_path)
-            except Exception:
-                self.logger.warning(f"Topic {topic_id} does not exist. It will be created when the first message is published.")
+                
+            # Initialize Pub/Sub client
+            if PUBSUB_PUBLISHER_CLIENT is None:
+                self.logger.error("Failed to initialize Pub/Sub PublisherClient. Check logs for details.")
+                return
+            self.publisher = PUBSUB_PUBLISHER_CLIENT()
             
             # Initialize Cloud Scheduler client
-            self.scheduler_client = scheduler.CloudSchedulerClient()
+            if SCHEDULER_CLIENT is None:
+                self.logger.error("Failed to initialize Cloud Scheduler client. Check logs for details.")
+                return
+            self.scheduler_client = SCHEDULER_CLIENT()
             
             # Initialize Cloud Tasks client
-            self.tasks_client = tasks_v2.CloudTasksClient()
+            if TASKS_CLIENT is None:
+                self.logger.error("Failed to initialize Cloud Tasks client. Check logs for details.")
+                return
+            self.tasks_client = TASKS_CLIENT()
+            
+            # Set up topic path
+            self.topic_path = self.publisher.topic_path(project_id, topic_id)
             
             self.initialized = True
-            self.logger.info("Initialized Proactive Engagement Agent with GCP services")
+            self.logger.info("Initialized Proactive Engagement Agent")
             
         except Exception as e:
-            self.logger.error(f"Error initializing Proactive Engagement Agent: {str(e)}")
+            self.logger.error(f"Failed to initialize Proactive Engagement Agent: {str(e)}", exc_info=True)
             self.initialized = False
     
+    def is_initialized(self) -> bool:
+        """Check if the agent is properly initialized."""
+        return self.initialized
+    
+    def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a proactive engagement request.
+        
+        Args:
+            input_data: Dictionary containing:
+                - user_id: Target user ID
+                - engagement_type: Type of engagement (e.g., 'follow_up', 'promotion', 'tip')
+                - message: The message to send (optional, can be generated based on type)
+                - trigger_time: When to send the message (ISO format string or datetime object)
+                - metadata: Additional data for message personalization
+                
+        Returns:
+            Dictionary containing:
+                - status: Success/failure status
+                - message_id: ID of the scheduled message (if applicable)
+                - scheduled_time: When the message is scheduled for
+        """
+        if not self.initialized:
+            return {
+                "status": "error",
+                "message": "Proactive Engagement Agent is not properly initialized"
+            }
+            
+        try:
+            user_id = input_data.get("user_id")
+            if not user_id:
+                return {"status": "error", "message": "Missing required field: user_id"}
+                
+            engagement_type = input_data.get("engagement_type", "general")
+            message = input_data.get("message")
+            trigger_time = input_data.get("trigger_time")
+            metadata = input_data.get("metadata", {})
+            
+            # If no message provided, generate one based on type and metadata
+            if not message:
+                message = self._generate_engagement_message(engagement_type, metadata)
+            
+            # If no trigger time, send immediately
+            if not trigger_time:
+                return self._publish_immediate_engagement(user_id, message, engagement_type, metadata)
+            
+            # Otherwise, schedule for later
+            return self._schedule_engagement(user_id, message, engagement_type, trigger_time, metadata)
+            
+        except Exception as e:
+            self.logger.error(f"Error processing proactive engagement: {str(e)}", exc_info=True)
+            return {"status": "error", "message": f"Failed to process engagement: {str(e)}"}
+            
     async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a proactive engagement request.

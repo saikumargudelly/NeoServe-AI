@@ -2,8 +2,8 @@ from typing import Dict, Any, Optional, List
 import logging
 from datetime import datetime, timedelta
 from .base_agent import BaseAgent
-from google.cloud import firestore
-from google.cloud.firestore_v1.base_query import FieldFilter
+# Use our custom import wrapper for better error handling
+from .google_imports import FIRESTORE_CLIENT, FieldFilter
 
 class PersonalizationAgent(BaseAgent):
     """
@@ -29,8 +29,11 @@ class PersonalizationAgent(BaseAgent):
     def initialize_agent(self) -> None:
         """Initialize the Firestore client and collections."""
         try:
+            if FIRESTORE_CLIENT is None:
+                raise ImportError("Firestore client is not available. Check logs for import errors.")
+                
             # Initialize Firestore client
-            self.db = firestore.AsyncClient(project=self.config.get("project_id"))
+            self.db = FIRESTORE_CLIENT(project=self.config.get("project_id"))
             
             # Set collection names with defaults
             self.user_collection = self.config.get("user_collection", "users")

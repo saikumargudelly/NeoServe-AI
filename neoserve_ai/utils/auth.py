@@ -1,8 +1,12 @@
 """
 Authentication and authorization utilities for the NeoServe AI API.
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+
+# Set up logging
+logger = logging.getLogger(__name__)
 import os
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -168,31 +172,56 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    if token is None:
-        # For development/testing, return a default user if no token is provided
-        # In production, you would want to raise the credentials_exception
-        if os.getenv("ENVIRONMENT") == "development":
-            return User(
-                user_id="dev_user",
-                email="dev@example.com",
-                roles=["customer"],
-                status="active",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
+    if not token:
+        logger.error("No token provided")
         raise credentials_exception
     
+    # Log token prefix for debugging (don't log full token for security)
+    token_prefix = token[:10] if len(token) > 10 else token
+    logger.debug(f"Attempting to verify token: {token_prefix}...")
+    logger.debug(f"Using JWT secret key: {JWT_SECRET_KEY[:5]}...")
+    logger.debug(f"Using algorithm: {JWT_ALGORITHM}")
+    
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        # Decode the token with verification
+        payload = jwt.decode(
+            token,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+            options={"verify_signature": True}
+        )
+        
+        logger.debug(f"Successfully decoded token payload: {payload}")
+        
         email: str = payload.get("sub")
-        if email is None:
+        if not email:
+            logger.error("No 'sub' claim found in token")
             raise credentials_exception
+            
         token_data = TokenData(
             email=email,
             user_id=payload.get("user_id"),
             roles=payload.get("roles", [])
         )
-    except JWTError:
+        
+        logger.debug(f"Extracted token data: {token_data}")
+        
+    except jwt.ExpiredSignatureError:
+        logger.error("Token has expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError as e:
+        logger.error(f"Invalid token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except JWTError as e:
+        logger.error(f"JWT Error: {str(e)}", exc_info=True)
         raise credentials_exception
     
     user = get_user(email=token_data.email)

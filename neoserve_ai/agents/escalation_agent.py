@@ -2,8 +2,8 @@ from typing import Dict, Any, List, Optional, Tuple
 import logging
 from datetime import datetime, timedelta
 from .base_agent import BaseAgent
-from google.cloud import firestore
-from google.cloud.firestore_v1.base_query import FieldFilter
+# Use our custom import wrapper for better error handling
+from .google_imports import FIRESTORE_CLIENT, FieldFilter
 
 class EscalationAgent(BaseAgent):
     """
@@ -42,8 +42,10 @@ class EscalationAgent(BaseAgent):
                 )
                 return
             
-            # Initialize Firestore client
-            self.db = firestore.AsyncClient(project=project_id)
+            # Initialize Firestore client using our import wrapper
+            if FIRESTORE_CLIENT is None:
+                raise ValueError("Firestore client is not available. Check your Google Cloud setup and credentials.")
+            self.db = FIRESTORE_CLIENT(project=project_id)
             
             # Set collection names with defaults
             self.escalation_collection = self.config.get("escalation_collection", "escalations")

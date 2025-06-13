@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timedelta
 import uuid
 import logging
@@ -10,6 +10,7 @@ from neoserve_ai.config.settings import get_config, get_agent_config
 from neoserve_ai.schemas.chat import ChatRequest, ChatResponse, ChatMessage, EscalationDetails
 from neoserve_ai.schemas.user import User, UserInDB
 from neoserve_ai.utils.auth import get_current_user, any_authenticated
+from neoserve_ai.api.api_v1.deps import get_optional_user
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -42,65 +43,89 @@ async def startup_event():
 @router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    current_user: User = Depends(any_authenticated)
+    current_user: Optional[User] = Depends(get_optional_user)
 ) -> ChatResponse:
     """
     Process a chat message and return a response from the appropriate agent.
     
+    In development mode, this endpoint can be accessed without authentication.
+    In production, a valid JWT token is required.
+    
     Args:
         request: The chat request containing the user's message and metadata
-        current_user: The authenticated user (from JWT token)
+        current_user: The authenticated user, or None if not authenticated
         
     Returns:
-        ChatResponse containing the agent's response and metadata
+        ChatResponse containing the agent's response
     """
+    # Get config
+    config = get_config()
+    
+    # In development, use a mock user if not authenticated
+    if not current_user:
+        if config.ENVIRONMENT == "development":
+            current_user = UserInDB(
+                id=1,
+                username="dev_user",
+                email="dev@example.com",
+                hashed_password="",
+                full_name="Development User",
+                is_active=True,
+                is_superuser=False
+            )
+        else:
+            # In production, require authentication
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    
+    # Log the incoming request
+    logger.info(f"Processing chat request from user {current_user.id}")
+    logger.info(f"Message: {request.message}")
+    logger.info(f"Session ID: {request.session_id}")
+    
     try:
-        logger.info(f"Processing chat request from user {current_user.user_id}")
-        
-        # Process the message through the orchestrator
-        result = await orchestrator.process_message(
-            user_id=current_user.user_id,
-            session_id=request.session_id,
+        # Process the message using the orchestrator
+        response = await orchestrator.process_message(
             message=request.message,
-            metadata={
-                "user_metadata": current_user.dict(),
-                "request_metadata": request.metadata or {}
-            }
-        )
-        
-        # Prepare response
-        response = ChatResponse(
-            message_id=request.message_id or str(uuid.uuid4()),
             session_id=request.session_id,
-            timestamp=datetime.utcnow().isoformat(),
-            response=result.get("response", "I'm sorry, I couldn't process your request."),
-            intent=result.get("intent", "unknown"),
-            confidence=result.get("confidence", 0.0),
-            source=result.get("source", "orchestrator"),
-            metadata={
-                "sources": result.get("sources", []),
-                "intent_confidence": result.get("confidence", 0.0)
-            },
-            requires_follow_up=result.get("requires_follow_up", False),
-            suggested_responses=result.get("suggested_responses", []),
-            escalation=EscalationDetails(**result["escalation"]) if result.get("escalation") else None
+            user_id=str(current_user.id),
+            metadata=request.metadata or {}
         )
         
-        logger.info(f"Successfully processed chat request for user {current_user.user_id}")
-        return response
+        # Log the response
+        logger.info(f"Generated response: {response.get('response')}")
+        
+        # Return the response with all required fields
+        return ChatResponse(
+            message_id=str(uuid.uuid4()),
+            session_id=request.session_id,
+            timestamp=datetime.utcnow(),
+            response=response.get('response', 'No response generated'),
+            intent=response.get('intent', 'general_query'),
+            confidence=float(response.get('confidence', 0.8)),
+            source=response.get('source', 'knowledge_base'),
+            metadata=response.get('metadata', {}) or {},
+            requires_follow_up=response.get('requires_follow_up', False),
+            suggested_responses=response.get('suggested_responses', []),
+            sources=response.get('sources', []),
+            escalation=response.get('escalation')
+        )
         
     except Exception as e:
-        logger.error(f"Error processing chat request: {str(e)}", exc_info=True)
+        logger.error(f"Error processing chat message: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while processing your request"
+            detail="An error occurred while processing your message"
         )
 
 @router.get("/history/{session_id}", response_model=List[ChatMessage])
 async def get_chat_history(
     session_id: str,
     limit: int = 20,
-    current_user: User = Depends(any_authenticated)
+    current_user: Optional[User] = Depends(get_optional_user)
 ) -> List[ChatMessage]:
     """
     Retrieve chat history for a specific session.
