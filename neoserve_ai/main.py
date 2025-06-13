@@ -5,10 +5,10 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, APIRouter, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -46,12 +46,19 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     description="API for NeoServe AI - A multi-agent system for customer service and engagement",
     version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url="/docs",  # Changed from /api/docs to /docs
+    redoc_url="/redoc",  # Changed from /api/redoc to /redoc
+    openapi_url="/openapi.json",  # Changed from /api/openapi.json to /openapi.json
     lifespan=lifespan,
     debug=settings.DEBUG
 )
+
+# Create API v1 router
+api_v1_router = APIRouter(prefix=settings.API_V1_STR)
+api_v1_router.include_router(api_router)
+
+# Include API v1 router
+app.include_router(api_v1_router)
 
 # Set up CORS
 app.add_middleware(
@@ -113,15 +120,12 @@ async def health_check():
         "version": "0.1.0"
     }
 
-@app.get("/", tags=["root"], include_in_schema=False)
+from fastapi.responses import RedirectResponse
+
+@app.get("/", include_in_schema=False)
 async def root():
-    """Root endpoint with basic API information."""
-    return {
-        "message": f"Welcome to {settings.PROJECT_NAME} API",
-        "version": "0.1.0",
-        "environment": settings.ENVIRONMENT,
-        "docs": "/api/docs"
-    }
+    """Redirect root to API documentation."""
+    return RedirectResponse(url="/docs")
 
 if __name__ == "__main__":
     import uvicorn
